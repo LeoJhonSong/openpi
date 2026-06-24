@@ -20,6 +20,8 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.naviai_policy as naviai_policy
+import openpi.policies.naviai_gripper_policy as naviai_gripper_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -65,6 +67,9 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # Local root directory for the dataset. If provided, the dataset will be loaded from this path
+    # instead of downloading from HuggingFace Hub.
+    local_root: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -461,6 +466,106 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
+# This is for dexterous hands with two arms, totally three images are used.
+@dataclasses.dataclass(frozen=True)
+class LeRobotNaviAIDataConfig(DataConfigFactory):
+    """
+    Data config for NaviAI WA1 robot in LeRobot format.
+    Images: realsense_up (base), left_wrist, right_wrist (224x224x3).
+    """
+
+    # If provided, will be injected into the input data if the "prompt" key is not present.
+    default_prompt: str | None = None
+    # Local root directory for the dataset.
+    local_root: str | None = None
+    # Action dimension (24 for world eef, 29 for joint angles).
+    action_dim: int = 24
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Repack: map LeRobot dataset keys to the keys expected by NaviAIInputs.
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "observation.images.realsense_up",
+                        "observation/left_wrist_image": "observation.images.left_wrist",
+                        "observation/right_wrist_image": "observation.images.right_wrist",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+
+        # Data transforms: no delta transform needed since actions are already delta.
+        data_transforms = _transforms.Group(
+            inputs=[naviai_policy.NaviAIInputs(model_type=model_config.model_type)],
+            outputs=[naviai_policy.NaviAIOutputs(action_dim=self.action_dim)],
+        )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        base = self.create_base_config(assets_dirs, model_config)
+        return dataclasses.replace(
+            base,
+            local_root=self.local_root,
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=("action",),
+        )
+
+
+
+# This is for gripper only, only right and breast image are used.
+@dataclasses.dataclass(frozen=True)
+class LeRobotNaviAIGripperDataConfig(DataConfigFactory):
+    """
+    Data config for NaviAI WA1 robot in LeRobot format, using hands as gripper.
+    Images: realsense_up (base), right_wrist (224x224x3).
+    """
+
+    # If provided, will be injected into the input data if the "prompt" key is not present.
+    default_prompt: str | None = None
+    # Local root directory for the dataset.
+    local_root: str | None = None
+    # Action dimension (7 for world eef, 11 for joint angles).
+    action_dim: int = 7
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Repack: map LeRobot dataset keys to the keys expected by NaviAIInputs.
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "observation.images.realsense_up",
+                        "observation/right_wrist_image": "observation.images.right_wrist",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+
+        # Data transforms: no delta transform needed since actions are already delta.
+        data_transforms = _transforms.Group(
+            inputs=[naviai_gripper_policy.NaviAIInputs(model_type=model_config.model_type)],
+            outputs=[naviai_gripper_policy.NaviAIOutputs(action_dim=self.action_dim)],
+        )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        base = self.create_base_config(assets_dirs, model_config)
+        return dataclasses.replace(
+            base,
+            local_root=self.local_root,
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=("action",),
+        )
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
@@ -915,6 +1020,187 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
         num_train_steps=20_000,
         batch_size=32,
+    ),
+    #
+    # Fine-tuning NaviAI configs.
+    #
+    TrainConfig(
+        name="pi0_naviai_lora_tcp",
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIDataConfig(
+            repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+    ),
+    TrainConfig(
+        name="pi05_naviai_lora_tcp",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIDataConfig(
+            repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_naviai_lora_joint",
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIDataConfig(
+            repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=29,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+    ),
+    TrainConfig(
+        name="pi05_naviai_lora_joint",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIDataConfig(
+            repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=29,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_naviai_gripper_lora_tcp",
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIGripperDataConfig(
+            repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=7
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+    ),
+    TrainConfig(
+        name="pi0_naviai_gripper_lora_joint",
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIGripperDataConfig(
+            repo_id="naviai/joint_gripper_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=11,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+    ),
+    TrainConfig(
+        name="pi05_naviai_gripper_lora_tcp",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIGripperDataConfig(
+            repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=7,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_naviai_gripper_lora_joint",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon=8,
+        ),
+        data=LeRobotNaviAIGripperDataConfig(
+            repo_id="naviai/joint_gripper_wa1_grasp_the_spoon",
+            local_root="/home/yyma/yiyao/VLA/openpi/data",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="grasp the spoon",
+            action_dim=11,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=32,
+        num_train_steps=30_000,
     ),
     #
     # ALOHA Sim configs. This config is used to demonstrate how to train on a simple simulated environment.

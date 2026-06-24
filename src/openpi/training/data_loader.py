@@ -137,9 +137,18 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+    local_root = data_config.local_root
+    # When local_root is provided, construct the full dataset path by joining root and repo_id,
+    # since LeRobotDatasetMetadata uses Path(root) directly as the dataset directory.
+    if local_root is not None:
+        import pathlib
+        dataset_root = str(pathlib.Path(local_root) / repo_id)
+    else:
+        dataset_root = None
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=dataset_root)
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
+        root=dataset_root,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
