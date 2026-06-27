@@ -14,6 +14,7 @@ import torch
 import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
+import openpi.training.greenaug as _greenaug
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -169,8 +170,24 @@ def create_rlds_dataset(
     )
 
 
-def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip_norm_stats: bool = False) -> Dataset:
-    """Transform the dataset by applying the data transforms."""
+def _build_greenaug_transform(data_config: _config.DataConfig):
+    """训练专属绿幕增强: 按DataConfig的key->相机映射 + 数据集根greenaug.json构造.
+
+    未配置 (greenaug_key_to_camera为None) 或数据集无greenaug.json时返回None (不增强).
+    背景图从约定目录读, 由LeRobotDatasetMetadata(repo_id).root定位数据集根, 跟随HF_LEROBOT_HOME."""
+    if not data_config.greenaug_key_to_camera or data_config.repo_id in (None, "fake"):
+        return None
+    dataset_root = lerobot_dataset.LeRobotDatasetMetadata(data_config.repo_id).root
+    return _greenaug.build_transform(dataset_root, _greenaug.DEFAULT_BACKGROUND_DIR, data_config.greenaug_key_to_camera)
+
+
+def transform_dataset(
+    dataset: Dataset, data_config: _config.DataConfig, *, skip_norm_stats: bool = False, image_augment=None
+) -> Dataset:
+    """Transform the dataset by applying the data transforms.
+
+    image_augment: 训练专属图像增强 (如绿幕替换), 插在data_transforms之后, Normalize之前;
+    None表示不增强. norm stats计算等非训练路径不传它, 保证推理/统计不受增强影响."""
     norm_stats = {}
     if data_config.repo_id != "fake" and not skip_norm_stats:
         if data_config.norm_stats is None:
@@ -185,6 +202,7 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
         [
             *data_config.repack_transforms.inputs,
             *data_config.data_transforms.inputs,
+            *([image_augment] if image_augment is not None else []),
             _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.model_transforms.inputs,
         ],
@@ -300,7 +318,9 @@ def create_torch_data_loader(
         seed: The seed to use for shuffling the data.
     """
     dataset = create_torch_dataset(data_config, action_horizon, model_config)
-    dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
+    dataset = transform_dataset(
+        dataset, data_config, skip_norm_stats=skip_norm_stats, image_augment=_build_greenaug_transform(data_config)
+    )
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size

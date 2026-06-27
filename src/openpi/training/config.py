@@ -92,6 +92,10 @@ class DataConfig:
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
 
+    # 训练专属绿幕增强: {模型图像key: 数据集相机列名}. 非None时, 训练data loader会按
+    # 数据集根的greenaug.json抠绿幕, 贴随机背景 (见training/greenaug.py). 推理不生效.
+    greenaug_key_to_camera: dict[str, str] | None = None
+
     # Only used for RLDS data loader (ie currently only used for DROID).
     rlds_data_dir: str | None = None
     # Action space for DROID dataset.
@@ -556,6 +560,9 @@ class LeRobotNaviAIGripperDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=("action",),
+            # base_0_rgb <- realsense_up, right_wrist_0_rgb <- right_wrist;
+            # left_wrist_0_rgb是置零虚拟相机, 不增强
+            greenaug_key_to_camera={"base_0_rgb": "realsense_up", "right_wrist_0_rgb": "right_wrist"},
         )
 
 
