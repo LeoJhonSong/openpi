@@ -20,8 +20,8 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
-import openpi.policies.naviai_policy as naviai_policy
 import openpi.policies.naviai_gripper_policy as naviai_gripper_policy
+import openpi.policies.naviai_policy as naviai_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -67,9 +67,6 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
-    # Local root directory for the dataset. If provided, the dataset will be loaded from this path
-    # instead of downloading from HuggingFace Hub.
-    local_root: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -466,6 +463,7 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
+
 # This is for dexterous hands with two arms, totally three images are used.
 @dataclasses.dataclass(frozen=True)
 class LeRobotNaviAIDataConfig(DataConfigFactory):
@@ -476,8 +474,6 @@ class LeRobotNaviAIDataConfig(DataConfigFactory):
 
     # If provided, will be injected into the input data if the "prompt" key is not present.
     default_prompt: str | None = None
-    # Local root directory for the dataset.
-    local_root: str | None = None
     # Action dimension (24 for world eef, 29 for joint angles).
     action_dim: int = 24
 
@@ -509,13 +505,11 @@ class LeRobotNaviAIDataConfig(DataConfigFactory):
         base = self.create_base_config(assets_dirs, model_config)
         return dataclasses.replace(
             base,
-            local_root=self.local_root,
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=("action",),
         )
-
 
 
 # This is for gripper only, only right and breast image are used.
@@ -528,8 +522,6 @@ class LeRobotNaviAIGripperDataConfig(DataConfigFactory):
 
     # If provided, will be injected into the input data if the "prompt" key is not present.
     default_prompt: str | None = None
-    # Local root directory for the dataset.
-    local_root: str | None = None
     # Action dimension (7 for world eef, 11 for joint angles).
     action_dim: int = 7
 
@@ -551,8 +543,8 @@ class LeRobotNaviAIGripperDataConfig(DataConfigFactory):
 
         # Data transforms: no delta transform needed since actions are already delta.
         data_transforms = _transforms.Group(
-            inputs=[naviai_gripper_policy.NaviAIInputs(model_type=model_config.model_type)],
-            outputs=[naviai_gripper_policy.NaviAIOutputs(action_dim=self.action_dim)],
+            inputs=[naviai_gripper_policy.NaviAIGripperInputs(model_type=model_config.model_type)],
+            outputs=[naviai_gripper_policy.NaviAIGripperOutputs(action_dim=self.action_dim)],
         )
 
         model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
@@ -560,12 +552,12 @@ class LeRobotNaviAIGripperDataConfig(DataConfigFactory):
         base = self.create_base_config(assets_dirs, model_config)
         return dataclasses.replace(
             base,
-            local_root=self.local_root,
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=("action",),
         )
+
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
@@ -1033,7 +1025,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIDataConfig(
             repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
         ),
@@ -1055,7 +1046,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIDataConfig(
             repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
         ),
@@ -1076,7 +1066,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIDataConfig(
             repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
             action_dim=29,
@@ -1099,7 +1088,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIDataConfig(
             repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
             action_dim=29,
@@ -1121,10 +1109,9 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIGripperDataConfig(
             repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
-            action_dim=7
+            action_dim=7,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=30_000,
@@ -1143,7 +1130,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIGripperDataConfig(
             repo_id="naviai/joint_gripper_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
             action_dim=11,
@@ -1166,7 +1152,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIGripperDataConfig(
             repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
             action_dim=7,
@@ -1189,7 +1174,6 @@ _CONFIGS = [
         ),
         data=LeRobotNaviAIGripperDataConfig(
             repo_id="naviai/joint_gripper_wa1_grasp_the_spoon",
-            local_root="/home/yyma/yiyao/VLA/openpi/data",
             base_config=DataConfig(prompt_from_task=True),
             default_prompt="grasp the spoon",
             action_dim=11,

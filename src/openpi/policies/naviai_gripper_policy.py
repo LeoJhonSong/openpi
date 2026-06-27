@@ -8,7 +8,7 @@ from openpi.models import model as _model
 
 
 def make_naviai_example() -> dict:
-    """Creates a random input example for the NaviAI policy."""
+    """Creates a random input example for the NaviAI gripper policy."""
     return {
         "observation/state": np.random.rand(7).astype(np.float32),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
@@ -28,8 +28,8 @@ def _parse_image(image) -> np.ndarray:
 
 
 @dataclasses.dataclass(frozen=True)
-class NaviAIInputs(transforms.DataTransformFn):
-    """Converts NaviAI inputs to the model expected format.
+class NaviAIGripperInputs(transforms.DataTransformFn):
+    """Converts NaviAI gripper inputs to the model expected format.
 
     NaviAI WA1 robot has:
     - state: 7-dim (world eef), 11-dim (joint angles)
@@ -67,10 +67,10 @@ class NaviAIInputs(transforms.DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
-class NaviAIOutputs(transforms.DataTransformFn):
-    """Converts model outputs back to NaviAI action format."""
+class NaviAIGripperOutputs(transforms.DataTransformFn):
+    """Converts model outputs back to NaviAI gripper action format."""
 
     action_dim: int = 7
 
     def __call__(self, data: dict) -> dict:
-        return {"actions": np.asarray(data["actions"][:, :self.action_dim])}
+        return {"actions": np.asarray(data["actions"][:, : self.action_dim])}
