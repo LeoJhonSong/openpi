@@ -7,17 +7,6 @@ from openpi import transforms
 from openpi.models import model as _model
 
 
-def make_naviai_example() -> dict:
-    """Creates a random input example for the NaviAI gripper policy."""
-    return {
-        "observation/state": np.random.rand(7).astype(np.float32),
-        "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "observation/right_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "prompt": "grasp the spoon",
-    }
-
-
 def _parse_image(image) -> np.ndarray:
     image = np.asarray(image)
     if np.issubdtype(image.dtype, np.floating):
@@ -31,10 +20,9 @@ def _parse_image(image) -> np.ndarray:
 class NaviAIGripperInputs(transforms.DataTransformFn):
     """Converts NaviAI gripper inputs to the model expected format.
 
-    NaviAI WA1 robot has:
-    - state: 7-dim (world eef), 11-dim (joint angles)
-    - action: 7-dim (world eef delta), 11-dim (joint angles delta)
-    - images: realsense_up (base), left_wrist, right_wrist (all 224x224x3)
+    Gripper-family (right-arm only) embodiment, dimension-agnostic: state/action are
+    passed through unchanged (tcp_gripper=7).
+    Images: realsense_up (base) and right_wrist are active; left_wrist is zeroed and masked.
     """
 
     model_type: _model.ModelType = _model.ModelType.PI0
@@ -68,9 +56,13 @@ class NaviAIGripperInputs(transforms.DataTransformFn):
 
 @dataclasses.dataclass(frozen=True)
 class NaviAIGripperOutputs(transforms.DataTransformFn):
-    """Converts model outputs back to NaviAI gripper action format."""
+    """Converts model outputs back to NaviAI gripper action format.
 
-    action_dim: int = 7
+    The model pads actions to its internal width (32); slice back to the real
+    dimension. action_dim is required and supplied per-config (no mode default).
+    """
+
+    action_dim: int
 
     def __call__(self, data: dict) -> dict:
         return {"actions": np.asarray(data["actions"][:, : self.action_dim])}
