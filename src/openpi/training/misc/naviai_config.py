@@ -1,4 +1,9 @@
-"""NaviAI WA1 fine-tuning configs.
+"""NaviAI fine-tuning configs.
+
+Config 名只承载"配方": <algo>_<space>_<tuning>, 任务/机器人/数据集均无关.
+space 取值与导出器 export_lerobot.py 的 mode 一致. 同一 config 可服务多个数据集 ——
+repo_id 不在此硬编码, 由训练时 CLI 覆盖 (--data.repo-id=naviai/<dataset_id>), 见 vla/openpi/justfile.
+决策见 docs/adr/0012-unified-data-model-naming.md.
 
 Each TrainConfig states its action_dim explicitly so the dimension is visible at
 the config site, not buried in a DataConfig default. Modes:
@@ -24,14 +29,13 @@ def get_naviai_configs():
         # Hand-family (dual-arm, three cameras).
         #
         TrainConfig(
-            name="pi0_naviai_lora_tcp",
+            name="pi0_tcp_hand_lora",
             model=pi0_config.Pi0Config(
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
                 action_horizon=8,
             ),
             data=LeRobotNaviAIDataConfig(
-                repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=24,
@@ -45,7 +49,7 @@ def get_naviai_configs():
             batch_size=32,
         ),
         TrainConfig(
-            name="pi05_naviai_lora_tcp",
+            name="pi05_tcp_hand_lora",
             model=pi0_config.Pi0Config(
                 pi05=True,
                 paligemma_variant="gemma_2b_lora",
@@ -53,7 +57,6 @@ def get_naviai_configs():
                 action_horizon=8,
             ),
             data=LeRobotNaviAIDataConfig(
-                repo_id="naviai/tcp_hand_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=24,
@@ -67,14 +70,13 @@ def get_naviai_configs():
             num_train_steps=30_000,
         ),
         TrainConfig(
-            name="pi0_naviai_lora_joint",
+            name="pi0_joint_hand_lora",
             model=pi0_config.Pi0Config(
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
                 action_horizon=8,
             ),
             data=LeRobotNaviAIDataConfig(
-                repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=29,
@@ -88,7 +90,7 @@ def get_naviai_configs():
             batch_size=32,
         ),
         TrainConfig(
-            name="pi05_naviai_lora_joint",
+            name="pi05_joint_hand_lora",
             model=pi0_config.Pi0Config(
                 pi05=True,
                 paligemma_variant="gemma_2b_lora",
@@ -96,7 +98,6 @@ def get_naviai_configs():
                 action_horizon=8,
             ),
             data=LeRobotNaviAIDataConfig(
-                repo_id="naviai/joint_hand_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=29,
@@ -110,14 +111,13 @@ def get_naviai_configs():
             num_train_steps=30_000,
         ),
         TrainConfig(
-            name="pi0_naviai_lora_finger",
+            name="pi0_tcp_finger_lora",
             model=pi0_config.Pi0Config(
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
                 action_horizon=8,
             ),
             data=LeRobotNaviAIDataConfig(
-                repo_id="naviai/tcp_finger_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=14,
@@ -130,18 +130,35 @@ def get_naviai_configs():
             ema_decay=None,
             batch_size=32,
         ),
+        # Full fine-tuning variant of the finger config: no LoRA variants, no freeze
+        # filter (all params trained), and EMA left at the TrainConfig default (0.99).
+        # Sized for 2x H800 80G via FSDP (fsdp_devices=2, batch_size divisible by 2).
+        TrainConfig(
+            name="pi0_tcp_finger_full",
+            model=pi0_config.Pi0Config(
+                action_horizon=8,
+            ),
+            data=LeRobotNaviAIDataConfig(
+                base_config=DataConfig(prompt_from_task=True),
+                default_prompt="grasp the spoon",
+                action_dim=14,
+            ),
+            weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+            num_train_steps=30_000,
+            batch_size=32,
+            fsdp_devices=2,
+        ),
         #
         # Gripper-family (right-arm only, left wrist zeroed and masked).
         #
         TrainConfig(
-            name="pi0_naviai_gripper_lora_tcp",
+            name="pi0_tcp_gripper_lora",
             model=pi0_config.Pi0Config(
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
                 action_horizon=8,
             ),
             data=LeRobotNaviAIGripperDataConfig(
-                repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=7,
@@ -155,7 +172,7 @@ def get_naviai_configs():
             batch_size=32,
         ),
         TrainConfig(
-            name="pi05_naviai_gripper_lora_tcp",
+            name="pi05_tcp_gripper_lora",
             model=pi0_config.Pi0Config(
                 pi05=True,
                 paligemma_variant="gemma_2b_lora",
@@ -163,7 +180,6 @@ def get_naviai_configs():
                 action_horizon=8,
             ),
             data=LeRobotNaviAIGripperDataConfig(
-                repo_id="naviai/tcp_gripper_wa1_grasp_the_spoon",
                 base_config=DataConfig(prompt_from_task=True),
                 default_prompt="grasp the spoon",
                 action_dim=7,
