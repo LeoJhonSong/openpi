@@ -514,6 +514,12 @@ class LeRobotNaviAIDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=("action",),
+            # 三路相机都是真实相机, 全部抠绿幕增强
+            greenaug_key_to_camera={
+                "base_0_rgb": "realsense_up",
+                "left_wrist_0_rgb": "left_wrist",
+                "right_wrist_0_rgb": "right_wrist",
+            },
         )
 
 
