@@ -13,6 +13,20 @@ from openpi.training import config as _config
 import openpi.transforms as transforms
 
 
+def _detect_asset_id(assets_dir: pathlib.Path) -> str | None:
+    """从 checkpoint 的 assets 目录探测 asset_id.
+
+    asset_id 是含 norm_stats.json 的目录相对 assets 根的路径 (如 naviai/<dataset_id>).
+    仅当恰好存在一个这样的目录时才返回, 多个或零个都返回 None 交由上层报错.
+    """
+    if not assets_dir.is_dir():
+        return None
+    norm_stats_files = list(assets_dir.rglob("norm_stats.json"))
+    if len(norm_stats_files) != 1:
+        return None
+    return str(norm_stats_files[0].parent.relative_to(assets_dir))
+
+
 def create_trained_policy(
     train_config: _config.TrainConfig,
     checkpoint_dir: pathlib.Path | str,
@@ -59,9 +73,15 @@ def create_trained_policy(
     if norm_stats is None:
         # We are loading the norm stats from the checkpoint instead of the config assets dir to make sure
         # that the policy is using the same normalization stats as the original training process.
-        if data_config.asset_id is None:
+        asset_id = data_config.asset_id
+        if asset_id is None:
+            # config 不硬编码 repo_id, 训练时靠 --data.repo-id 覆盖算出
+            # asset_id; 推理端 serve_policy 未透传该值, 故从 checkpoint 自带的 assets 目录探测.
+            # checkpoint 里 norm_stats 落在 assets/<asset_id>/norm_stats.json, asset_id 即其相对路径.
+            asset_id = _detect_asset_id(checkpoint_dir / "assets")
+        if asset_id is None:
             raise ValueError("Asset id is required to load norm stats.")
-        norm_stats = _checkpoints.load_norm_stats(checkpoint_dir / "assets", data_config.asset_id)
+        norm_stats = _checkpoints.load_norm_stats(checkpoint_dir / "assets", asset_id)
 
     # Determine the device to use for PyTorch models
     if is_pytorch and pytorch_device is None:
